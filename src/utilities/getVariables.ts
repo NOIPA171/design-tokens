@@ -86,16 +86,20 @@ const detectVariableReferencesInCollection = (collection, variable) => {
   return deepMerge(variable, tmpVariable)
 }
 
+const INCLUDED_COLLECTIONS = ['_Color Primitives', '_Spacing Primivites', '6. Typography', '7. Semantic Tokens']
 export const getVariables = async (figma: PluginAPI, settings: Settings) => {
   const localVariableCollections =
     await figma.variables.getLocalVariableCollectionsAsync()
   const localVariables = await figma.variables.getLocalVariablesAsync()
-  const excludedCollectionIds = localVariableCollections?.filter(
-    (collection) =>
-      !['.', '_', ...settings.exclusionPrefix.split(',')].includes(
-        collection.name.charAt(0)
-      )
-  )
+
+  // const excludedCollectionIds = localVariableCollections?.filter(
+  //   (collection) =>
+  //     !['.', '_', ...settings.exclusionPrefix.split(',')].includes(
+  //       collection.name.charAt(0)
+  //     )
+  // )
+  const excludedCollectionIds = localVariableCollections?.filter(collection => INCLUDED_COLLECTIONS.includes(collection.name))
+
     .map((collection) => collection.id)
   // get collections
   const collections = localVariableCollections
@@ -103,6 +107,11 @@ export const getVariables = async (figma: PluginAPI, settings: Settings) => {
       localVariableCollections?.map((collection) => [collection.id, collection])
     )
     : []
+
+  const variablesObject = localVariables
+    ? Object.fromEntries(localVariables?.map((variable) => [variable.id, variable]))
+    : []
+
   // get variables
   const variables = await Promise.all(localVariables?.filter((variable) =>
     excludedCollectionIds.includes(variable.variableCollectionId)
@@ -128,6 +137,34 @@ export const getVariables = async (figma: PluginAPI, settings: Settings) => {
       const variableNameWithMode = `${collection}/${mode.name}/${variable.name}`
       const extractedVariable = await extractVariable(variable, value, mode)
 
+      let newVal = value
+      if (value.hasOwnProperty('type') && (value as VariableAlias).type === 'VARIABLE_ALIAS') {
+        const getReferencedVariable = variablesObject[(value as VariableAlias).id]
+        if (getReferencedVariable) {
+          // match the mode by name to get the correct value to handle cross-collection references
+          const modeName = mode.name === 'Mode 1' ? "Value" : mode.name // default mode is called "Mode 1" but in valueByMode it's called "Value"
+          const referencedMode = collections[getReferencedVariable.variableCollectionId].modes.find(m => m.name === modeName)
+          if (!referencedMode) {
+            console.log(`couldn't find mode ${modeName} in referenced variable collection with`, getReferencedVariable, 'with variable', variable)
+            return;
+          }
+          newVal = getReferencedVariable.valuesByMode[referencedMode.modeId]
+        } else {
+          console.log('didnt find variable: ', value)
+        }
+      }
+
+      switch (variable.resolvedType) {
+        case 'COLOR':
+          newVal = roundRgba(newVal as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+          break
+        case 'FLOAT':
+          newVal = roundWithDecimals(newVal as any, 2) // eslint-disable-line @typescript-eslint/no-explicit-any
+          break
+        default:
+          break
+      }
+
       return {
         ...extractedVariable,
         // name is constructed from collection, mode and variable name
@@ -135,11 +172,12 @@ export const getVariables = async (figma: PluginAPI, settings: Settings) => {
         // add metadata to extensions
         extensions: {
           [config.key.extensionPluginData]: {
-            mode: settings.modeInTokenValue ? mode.name : undefined,
+            mode: mode.name,
             collection: collection,
             scopes: variable.scopes,
             [config.key.extensionVariableStyleId]: variable.id,
-            exportKey: tokenTypes.variables.key as tokenExportKeyType
+            exportKey: tokenTypes.variables.key as tokenExportKeyType,
+            value: newVal
           }
         }
       }

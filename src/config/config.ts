@@ -18,7 +18,7 @@ export default {
     lastVersionSettingsOpened: 'lastVersionSettingsOpened',
     fileId: 'fileId',
     settings: 'settings',
-    extensionPluginData: 'org.lukasoppermann.figmaDesignTokens',
+    extensionPluginData: 'cf.figmaDesignTokens',
     extensionFigmaStyleId: 'styleId',
     extensionVariableStyleId: 'variableId',
     extensionAlias: 'alias',
